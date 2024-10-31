@@ -52,7 +52,7 @@ WITH first_order AS (
       PARTITION BY sales.customer_id 
       ORDER BY sales.order_date) AS row_num
   FROM sales
-  INNER JOIN menu
+  JOIN menu
     ON sales.product_id = menu.product_id
 )
 
@@ -74,40 +74,83 @@ WHERE row_num = 1
 **4. What is the most purchased item on the menu and how many times was it purchased by all customers?**
 
 ````sql
-
+SELECT menu.product_name,
+      COUNT(sales.product_id) AS purchased_number
+FROM menu
+JOIN sales ON menu.product_id = sales.product_id
+GROUP BY product_name
+ORDER BY purchased_number DESC
+LIMIT 1
 ````
 
 
 #### Solution:
-| most_purchased | product_name | 
+| product_name | purchased_number| 
 | ----------- | ----------- |
-|             |              |
+|ramen        |8              |
 
 
 **5. Which item was the most popular for each customer?**
 
 ````sql
-
+WITH popular_item AS (
+  SELECT sales.customer_id,
+          menu.product_name,
+          COUNT(sales.product_id) AS order_num,
+          DENSE_RANK() OVER (
+            PARTITION BY sales.customer_id 
+            ORDER BY COUNT(sales.product_id) DESC
+          ) AS product_rank
+  FROM sales
+  JOIN menu ON sales.product_id = menu.product_id
+  GROUP BY sales.customer_id, menu.product_name
+)
+SELECT customer_id,
+        product_name,
+        order_num
+FROM popular_item
+WHERE product_rank = 1
 ````
 
 
 #### Solution:
 | customer_id | product_name | order_count |
 | ----------- | ---------- |------------  |
-
+| A	| ramen	| 3 |
+| B	| ramen	| 2 |
+| B	| curry	| 2 |
+| B	| sushi	| 2 |
+| C	| ramen	| 3 |
 
 **6. Which item was purchased first by the customer after they became a member?**
 
 ```sql
-
+WITH become_member AS (
+  		SELECT members.customer_id,
+  				members.join_date,
+  				sales.product_id,
+  				menu.product_name,
+  				ROW_NUMBER() OVER (
+                  PARTITION BY members.customer_id
+                  ORDER BY sales.order_date 
+  				) AS member_rank
+        FROM members
+        JOIN sales ON members.customer_id = sales.customer_id
+                   AND sales.order_date > members.join_date
+        JOIN menu ON sales.product_id = menu.product_id
+        )
+SELECT customer_id,
+		product_name
+FROM become_member
+WHERE member_rank = 1
 ```
 
 
 #### Solution:
 | customer_id | product_name |
 | ----------- | ---------- |
-|             |           |
-|            |           |
+|    A         |   ramen      |
+|    B        |     sushi      |
 
 
 **7. Which item was purchased just before the customer became a member?**
@@ -197,6 +240,32 @@ WHERE row_num = 1
 
 
 ***
+## Learnings
+## 1. Use of DENSE_RANK(), RANK(), ROW_NUMBER()
+      - DENSE_RANK(): Best when you want to show all tied top items for each customer without skipping ranks.
+            Example - 
+            | customer_id | product_name | order_count | rank |
+            |-------------|--------------|-------------|------|
+            | 1           | curry        | 5           | 1    |
+            | 1           | sushi        | 5           | 1    |
+            | 1           | ramen        | 5           | 1    |  <-- Rank 1 for all the items
+      
+      - RANK(): Similar to DENSE_RANK(), but skips ranks after ties.
+            Example - 
+            | customer_id | product_name | order_count | rank |
+            |-------------|--------------|-------------|------|
+            | 1           | curry        | 5           | 1    |
+            | 1           | sushi        | 5           | 1    |
+            | 1           | ramen        | 3           | 3    |  <-- Rank 2 is skipped due to the tie on rank 1
+      
+      - ROW_NUMBER(): Use when you need unique ranks without ties; not suitable for finding "most popular" items when ties exist.
+            Example - 
+            | customer_id | product_name | order_count | rank |
+            |-------------|--------------|-------------|------|
+            | 1           | curry        | 5           | 1    |
+            | 1           | sushi        | 5           | 2    |  <-- No ties; each row gets a unique rank
+            | 1           | ramen        | 3           | 3    |
+
 
 ## Data Source & Inspiration
 - [Danny's Diner](https://8weeksqlchallenge.com/case-study-1/)
