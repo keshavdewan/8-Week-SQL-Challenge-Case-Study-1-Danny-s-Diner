@@ -251,15 +251,40 @@ WITH menu_points AS(
 **10. In the first week after a customer joins the program (including their join date) they earn 2x points on all items, not just sushi — how many points do customer A and B have at the end of January?**
 
 ```sql
+WITH dates_cte AS (
+  SELECT 
+    customer_id, 
+      join_date, 
+      join_date + 6 AS valid_date, 
+      DATE_TRUNC(
+        'month', '2021-01-31'::DATE)
+        + interval '1 month' 
+        - interval '1 day' AS last_date
+  FROM members
+)
 
+SELECT 
+  sales.customer_id, 
+  SUM(CASE
+    WHEN menu.product_name = 'sushi' THEN 2 * 10 * menu.price
+    WHEN sales.order_date BETWEEN dates.join_date AND dates.valid_date THEN 2 * 10 * menu.price
+    ELSE 10 * menu.price END) AS points
+FROM sales
+INNER JOIN dates_cte AS dates
+  ON sales.customer_id = dates.customer_id
+  AND dates.join_date <= sales.order_date
+  AND sales.order_date <= dates.last_date
+INNER JOIN menu
+  ON sales.product_id = menu.product_id
+GROUP BY sales.customer_id
 ```
-
+--copied this code
 
 #### Solution:
 | customer_id | total_points | 
 | ----------- | ---------- |
-|            |  |
-|            |  |
+|      A      |	1020	  |
+|      B      | 320		 |
 
 
 ## BONUS QUESTIONS
@@ -269,13 +294,40 @@ WITH menu_points AS(
 **Recreate the table with: customer_id, order_date, product_name, price, member (Y/N)**
 
 ```sql
-
+SELECT sales.customer_id,
+  		sales.order_date,
+  		menu.product_name,
+  		menu.price,
+  		CASE 
+        	WHEN members.join_date > sales.order_date THEN 'N'
+            	WHEN members.join_date <= sales.order_date THEN 'Y'
+            	ELSE 'N'
+		END AS member_status
+FROM sales
+LEFT JOIN members ON sales.customer_id = members.customer_id
+INNER JOIN menu ON sales.product_id = menu.product_id
+ORDER BY sales.customer_id, 
+	sales.order_date
 ```
  
 #### Solution: 
 | customer_id | order_date | product_name | price | member |
 | ----------- | ---------- | -------------| ----- | ------ |
-
+| A           | 2021-01-01 | sushi        | 10    | N      |
+| A           | 2021-01-01 | curry        | 15    | N      |
+| A           | 2021-01-07 | curry        | 15    | Y      |
+| A           | 2021-01-10 | ramen        | 12    | Y      |
+| A           | 2021-01-11 | ramen        | 12    | Y      |
+| A           | 2021-01-11 | ramen        | 12    | Y      |
+| B           | 2021-01-01 | curry        | 15    | N      |
+| B           | 2021-01-02 | curry        | 15    | N      |
+| B           | 2021-01-04 | sushi        | 10    | N      |
+| B           | 2021-01-11 | sushi        | 10    | Y      |
+| B           | 2021-01-16 | ramen        | 12    | Y      |
+| B           | 2021-02-01 | ramen        | 12    | Y      |
+| C           | 2021-01-01 | ramen        | 12    | N      |
+| C           | 2021-01-01 | ramen        | 12    | N      |
+| C           | 2021-01-07 | ramen        | 12    | N      |
 
 ***
 
@@ -284,12 +336,57 @@ WITH menu_points AS(
 **Danny also requires further information about the ```ranking``` of customer products, but he purposely does not need the ranking for non-member purchases so he expects null ```ranking``` values for the records when customers are not yet part of the loyalty program.**
 
 ```sql
-
+WITH ranking_date AS (
+                SELECT sales.customer_id,
+                    sales.order_date,
+                    menu.product_name,
+                    menu.price,
+                    CASE 
+                        WHEN members.join_date > sales.order_date THEN 'N'
+                            WHEN members.join_date <= sales.order_date THEN 'Y'
+                            ELSE 'N'
+                    END AS member_status
+            FROM sales
+            LEFT JOIN members ON sales.customer_id = members.customer_id
+            INNER JOIN menu ON sales.product_id = menu.product_id
+            ORDER BY sales.customer_id,
+			sales.order_date
+			)
+SELECT  customer_id,
+        order_date,
+        product_name,
+        price,
+        member_status,
+        CASE 
+        	WHEN member_status = 'Y' 
+            THEN ROW_NUMBER() OVER (
+                    PARTITION BY customer_id, member_status
+                  	ORDER BY order_date) 
+            ELSE NULL
+            END AS ranking
+FROM ranking_date
+ORDER BY customer_id,
+		order_date 
 ```
 
 #### Solution: 
 | customer_id | order_date | product_name | price | member | ranking | 
 | ----------- | ---------- | -------------| ----- | ------ |-------- |
+| A           | 2021-01-01 | sushi        | 10    | N      | NULL
+| A           | 2021-01-01 | curry        | 15    | N      | NULL
+| A           | 2021-01-07 | curry        | 15    | Y      | 1
+| A           | 2021-01-10 | ramen        | 12    | Y      | 2
+| A           | 2021-01-11 | ramen        | 12    | Y      | 3
+| A           | 2021-01-11 | ramen        | 12    | Y      | 3
+| B           | 2021-01-01 | curry        | 15    | N      | NULL
+| B           | 2021-01-02 | curry        | 15    | N      | NULL
+| B           | 2021-01-04 | sushi        | 10    | N      | NULL
+| B           | 2021-01-11 | sushi        | 10    | Y      | 1
+| B           | 2021-01-16 | ramen        | 12    | Y      | 2
+| B           | 2021-02-01 | ramen        | 12    | Y      | 3
+| C           | 2021-01-01 | ramen        | 12    | N      | NULL
+| C           | 2021-01-01 | ramen        | 12    | N      | NULL
+| C           | 2021-01-07 | ramen        | 12    | N      | NULL
 
 
 ***
@@ -319,6 +416,12 @@ WITH menu_points AS(
             | 1           | sushi        | 5           | 2    |  <-- No ties; each row gets a unique rank
             | 1           | ramen        | 3           | 3    |
 
+## 2. Use of DATE_TRUNC and adding or removing months and end of months
+	
+ 	DATE_TRUNC('month', '2021-01-31'::DATE) -- This trims the date to the first day of the month, so it becomes 2021-01-01
+        + interval '1 month' -- Adding one month to 2021-01-01 gives 2021-02-01
+        - interval '1 day' AS last_date	-- Subtracting one day from 2021-02-01 gives 2021-01-31, which is the last day of January.
+	
 
 ## Data Source & Inspiration
 - [Danny's Diner](https://8weeksqlchallenge.com/case-study-1/)
